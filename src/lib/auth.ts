@@ -24,30 +24,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: {
     signIn: "/entrar",
   },
+  events: {
+    async createUser({ user }) {
+      const email = (user.email ?? "").toLowerCase();
+      const role =
+        email === ADMIN_EMAIL.toLowerCase() ? "TI" : "USER";
+      await db.user.update({ where: { id: user.id }, data: { role } });
+    },
+  },
   callbacks: {
     async signIn({ user, profile }) {
       const email = user?.email ?? profile?.email;
       if (!email) return false;
-
       const domain = email.split("@")[1]?.toLowerCase();
       if (domain !== ALLOWED_HD.toLowerCase()) return false;
-
-      const role = email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? "TI" : "USER";
-
-      await db.user.upsert({
-        where: { email },
-        create: {
-          email,
-          name: user?.name ?? profile?.name ?? null,
-          image: user?.image ?? (profile?.picture as string | undefined) ?? null,
-          role,
-        },
-        update: {
-          name: user?.name ?? profile?.name ?? undefined,
-          image: user?.image ?? (profile?.picture as string | undefined) ?? undefined,
-        },
-      });
-
       return true;
     },
     async session({ session, user }) {
