@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  TI
+  ADMIN
+}
+
+enum TicketCategory {
+  HARDWARE
+  SOFTWARE
+  REDE
+  ACESSO
+  IMPRESSAO
+  EMAIL
+  OUTRO
+}
+
+enum TicketPriority {
+  BAIXA
+  MEDIA
+  ALTA
+  CRITICA
+}
+
+enum TicketStatus {
+  ABERTO
+  EM_ANDAMENTO
+  AGUARDANDO
+  RESOLVIDO
+  FECHADO
+}
+
+enum ClientType {
+  PESSOA
+  EMPRESA
+}
+
+enum LegalArea {
+  CONSULTIVO
+  TRABALHISTA
+  CIVEL
+  PREVIDENCIARIO
+  ADMINISTRATIVO
+  PENAL
+  FAMILIA_SUCESSOES
+  TRIBUTARIO_EMPRESARIAL
+  RECURSOS
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(USER)
+
+  accounts Account[]
+  sessions Session[]
+
+  ticketsRequested Ticket[]        @relation("TicketRequester")
+  ticketsAssigned  Ticket[]        @relation("TicketAssignee")
+  comments         TicketComment[]
+  activities       Activity[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Ticket {
+  id          String         @id @default(cuid())
+  protocol    String         @unique
+  subject     String
+  description String         @db.Text
+  category    TicketCategory
+  priority    TicketPriority @default(MEDIA)
+  status      TicketStatus   @default(ABERTO)
+
+  requesterId String
+  requester   User   @relation("TicketRequester", fields: [requesterId], references: [id])
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  comments    TicketComment[]
+  attachments TicketAttachment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+}
+
+model TicketComment {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model TicketAttachment {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  name     String
+  url      String
+  size     Int
+  mimeType String
+
+  createdAt DateTime @default(now())
+}
+
+model Client {
+  id          String     @id @default(cuid())
+  type        ClientType
+  name        String
+  document    String?    @unique
+  email       String?
+  phone       String?
+  address     String?
+
+  cases Case[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Case {
+  id       String    @id @default(cuid())
+  number   String    @unique
+  title    String
+  area     LegalArea
+  summary  String?   @db.Text
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  activities Activity[]
+
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+}
+
+model Activity {
+  id     String  @id @default(cuid())
+  caseId String
+  case   Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  description String   @db.Text
+  minutes     Int      @default(0)
+  performedAt DateTime @default(now())
+}
+
+model Service {
+  id          String  @id @default(cuid())
+  sku         String  @unique
+  name        String
+  description String? @db.Text
+  price       Decimal @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Announcement {
+  id      String   @id @default(cuid())
+  title   String
+  body    String   @db.Text
+  pinned  Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

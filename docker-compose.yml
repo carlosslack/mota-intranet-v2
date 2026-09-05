@@ -1,0 +1,48 @@
+services:
+  app:
+    image: ghcr.io/OWNER/mota-intranet-v2:latest
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npx prisma db push --accept-data-loss && node server.js"
+    volumes:
+      - mota-uploads:/app/uploads
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.mota-intranet.rule=Host(`${TRAEFIK_HOST:-intranet.motaadv.net}`)"
+      - "traefik.http.routers.mota-intranet.entrypoints=websecure"
+      - "traefik.http.routers.mota-intranet.tls=true"
+      - "traefik.http.routers.mota-intranet.tls.certresolver=letsencrypt"
+      - "traefik.http.services.mota-intranet.loadbalancer.server.port=3000"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - mota-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+volumes:
+  mota-db:
+  mota-uploads:
+
+networks:
+  web:
+    external: true
+  internal:
