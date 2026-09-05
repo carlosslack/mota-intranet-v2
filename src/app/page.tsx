@@ -1,151 +1,139 @@
-import { auth, signOut } from "@/lib/auth";
-import { redirect } from "next/navigation";
-import Link from "next/link";
-import { Icon } from "@/components/Icon";
+import { Shell } from '@/components/Shell';
+import { Icon } from '@/components/Icon';
+import Link from 'next/link';
+import { prisma } from '@/lib/db';
+import { timeAgo, fmtDate } from '@/lib/format';
 
-function greeting(d: Date) {
-  const h = d.getHours();
-  if (h < 12) return "Bom dia";
-  if (h < 18) return "Boa tarde";
-  return "Boa noite";
-}
+export default async function HomePage() {
+  const [announcements, upcoming] = await Promise.all([
+    prisma.announcement.findMany({ orderBy:{createdAt:'desc'}, take: 3 }).catch(()=>[]),
+    prisma.activity.findMany({ where: { dueAt: { gte: new Date() } }, orderBy: { dueAt: 'asc' }, take: 2 }).catch(()=>[])
+  ]);
 
-function initials(name?: string | null, email?: string | null) {
-  const base = (name ?? email ?? "?").trim();
-  const parts = base.split(/[\s@.]+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "?";
-  const second = parts[1]?.[0] ?? "";
-  return (first + second).toUpperCase();
-}
+  const h = new Date().getHours();
+  const greeting = h >= 5 && h < 12 ? 'Bom dia' : h >= 12 && h < 18 ? 'Boa tarde' : 'Boa noite';
 
-const APPS = [
-  { name: "Meet", href: "https://meet.google.com", icon: "videocam", external: true },
-  { name: "Chamado TI", href: "/chamados/novo", icon: "support_agent", external: false },
-  { name: "Arquivos", href: "https://drive.google.com", icon: "folder_open", external: true },
-  { name: "CRM", href: "/crm", icon: "groups", external: false },
-  { name: "Agenda", href: "/agenda", icon: "event", external: false },
-  { name: "Gmail", href: "https://mail.google.com", icon: "mail", external: true },
-];
-
-export default async function Home() {
-  const session = await auth();
-  if (!session?.user) redirect("/entrar");
-
-  const user = session.user;
-  const now = new Date();
-  const first = user.name?.split(" ")[0] ?? "";
+  const dockApps = [
+    { title:'Meet', hint:'Criar reunião', icon:'videocam', bg:'bg-emerald-500/15', color:'text-emerald-400', href:'https://meet.google.com/new', external:true },
+    { title:'Chamado TI', hint:'Abrir novo', icon:'support_agent', bg:'bg-rose-500/15', color:'text-rose-400', href:'/chamados/novo' },
+    { title:'Arquivos', hint:'Drive do escritório', icon:'folder_managed', bg:'bg-sky-500/15', color:'text-sky-400', href:'https://drive.google.com', external:true },
+    { title:'CRM', hint:'Casos e clientes', icon:'gavel', bg:'bg-gold-300/15', color:'text-gold-300', href:'/casos' },
+    { title:'Agenda', hint:'Prazos e reuniões', icon:'event', bg:'bg-violet-500/15', color:'text-violet-400', href:'/agenda' },
+    { title:'Gmail', hint:'E-mail corporativo', icon:'mail', bg:'bg-gold-300/10', color:'text-gold-300', href:'https://mail.google.com', external:true }
+  ];
+  const suggestions = ['Conectar na impressora','Configurar acesso remoto','Acessar Drive compartilhado','Redefinir senha'];
 
   return (
-    <main className="min-h-screen flex flex-col">
-      <header className="flex items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg glass flex items-center justify-center">
-            <span className="font-display text-gold-300 text-xl font-semibold">M</span>
-          </div>
-          <div className="leading-tight">
-            <div className="font-display text-gold-300 tracking-wide text-sm font-semibold">
-              MOTA
+    <Shell active="home">
+      <div className="fade-up">
+        {/* IA hero */}
+        <div className="flex flex-col items-center py-6 text-center">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[.32em] text-gold-300">{greeting} · Assistente Interno</div>
+          <h2 className="mb-2 font-display text-4xl font-light leading-tight">Como posso <span className="font-normal text-gold-300">ajudar</span> hoje?</h2>
+          <p className="mb-6 text-ink-300">Tire dúvidas de protocolos, TI e do escritório — ou acesse um sistema abaixo.</p>
+
+          <div className="w-full max-w-[640px] overflow-hidden rounded-2xl panel">
+            <div className="flex items-center gap-2 border-b border-white/5 px-4 py-2 text-[11px] text-ink-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Assistente Mota · reservado para integração
+              <span className="ml-auto font-mono text-[10px]">openrouter · gemini-2.5-flash</span>
             </div>
-            <div className="text-[10px] text-gold-50/60 uppercase tracking-widest">
-              &amp; Advogados
+            <div className="flex items-center gap-3 px-4 py-3">
+              <span className="font-mono text-lg text-gold-300">›</span>
+              <input placeholder="Digite sua dúvida e pressione Enter..." disabled className="flex-1 bg-transparent font-mono text-sm outline-none placeholder:text-ink-500" />
+              <button disabled className="grid h-9 w-9 place-items-center rounded-lg bg-gold-gradient text-navy-900 disabled:opacity-50"><Icon name="send" size={18} /></button>
             </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {suggestions.map(s => (
+              <span key={s} className="rounded-pill border border-white/10 bg-white/[.03] px-3 py-1 text-xs text-ink-300">{s}</span>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Link
-            href="/chamados"
-            className="text-sm text-gold-50/70 hover:text-gold-300 transition"
-          >
-            Meus chamados
-          </Link>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/entrar" });
-            }}
-          >
-            <button
-              type="submit"
-              className="w-9 h-9 rounded-full glass flex items-center justify-center text-xs font-semibold text-gold-300 hover:border-gold-300/40 transition"
-              title={user.email ?? undefined}
-            >
-              {initials(user.name, user.email)}
-            </button>
-          </form>
-        </div>
-      </header>
-
-      <section className="flex-1 flex flex-col items-center justify-center px-6 gap-10">
-        <div className="text-center space-y-2">
-          <h1 className="font-display text-4xl md:text-5xl text-gold-50">
-            {greeting(now)}
-            {first ? `, ${first}` : ""}.
-          </h1>
-          <p className="text-gold-50/60 text-sm">
-            Como posso ajudar você hoje?
-          </p>
+        {/* Dock */}
+        <div className="mt-4 grid grid-cols-6 gap-3 border-t border-white/5 pt-6">
+          {dockApps.map(app => {
+            const inner = (
+              <>
+                <div className={`grid h-11 w-11 place-items-center rounded-lg ${app.bg} ${app.color}`}><Icon name={app.icon} size={22} /></div>
+                <b className="text-sm">{app.title}</b>
+                <span className="text-[11px] text-ink-500 text-center">{app.hint}</span>
+              </>
+            );
+            const cls = "group flex flex-col items-center gap-2 rounded-xl border border-white/5 bg-white/[.02] p-4 transition hover:-translate-y-0.5 hover:border-gold-300/30 hover:bg-white/[.04]";
+            return app.external
+              ? <a key={app.title} href={app.href} target="_blank" rel="noreferrer" className={cls}>{inner}</a>
+              : <Link key={app.title} href={app.href} className={cls}>{inner}</Link>;
+          })}
         </div>
 
-        <form
-          action="/api/ai/chat"
-          method="post"
-          className="w-full max-w-2xl glass rounded-2xl p-2 flex items-center gap-2"
-        >
-          <Icon name="auto_awesome" className="text-gold-300 pl-3" />
-          <input
-            name="q"
-            disabled
-            placeholder="Pergunte algo — em breve"
-            className="flex-1 bg-transparent outline-none px-2 py-3 text-sm placeholder:text-gold-50/40"
-          />
-          <button
-            type="submit"
-            disabled
-            className="rounded-xl bg-gold-300/20 text-gold-300 px-4 py-2 text-sm disabled:opacity-50"
-          >
-            Enviar
-          </button>
-        </form>
+        {/* Comunicados + Aniversariantes */}
+        <div className="mt-8 grid grid-cols-[1.3fr_1fr] gap-4">
+          <div className="panel p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <div className="grid h-8 w-8 place-items-center rounded-lg bg-gold-300/10 text-gold-300"><Icon name="campaign" size={18} /></div>
+              <b className="font-display">Comunicados</b>
+              <Link href="/comunicados" className="ml-auto text-xs text-gold-300">Ver todos →</Link>
+            </div>
+            {announcements.length === 0 && <p className="py-6 text-center text-sm text-ink-500">Nenhum comunicado ainda.</p>}
+            {announcements.map(a => (
+              <div key={a.id} className="border-t border-dashed border-white/5 py-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <b className="text-sm">{a.title}</b>
+                  <span className="text-[11px] text-ink-500">{timeAgo(a.createdAt)}</span>
+                </div>
+                <p className="text-xs leading-relaxed text-ink-300">{a.body}</p>
+              </div>
+            ))}
+          </div>
 
-        <div className="flex flex-wrap justify-center gap-2 max-w-2xl">
-          {[
-            "Abrir chamado de TI",
-            "Resumir o processo do cliente X",
-            "Modelo de petição inicial",
-            "Agenda de hoje",
-          ].map((s) => (
-            <span
-              key={s}
-              className="text-xs px-3 py-1.5 rounded-full glass text-gold-50/70"
-            >
-              {s}
-            </span>
-          ))}
+          <div className="flex flex-col gap-4">
+            <div className="panel p-5">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/15 text-violet-400"><Icon name="cake" size={18} /></div>
+                <b className="font-display">Aniversariantes</b>
+              </div>
+              <BirthdayRow initials="FZ" name="Fernanda Zaffari Prado" area="Trabalhista" date="11/09" />
+              <BirthdayRow initials="JR" name="João Ricardo Souza"     area="Cível"       date="14/09" />
+            </div>
+
+            <div className="panel p-5">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="grid h-8 w-8 place-items-center rounded-lg bg-sky-500/15 text-sky-400"><Icon name="event_upcoming" size={18} /></div>
+                <b className="font-display">Próximos prazos</b>
+              </div>
+              {upcoming.length === 0 ? (
+                <>
+                  <UpcomingRow day="09" month="SET" title="Audiência · Vale do Guaíba" sub="2ª Vara Cível · 14h · presencial" />
+                  <UpcomingRow day="12" month="SET" title="Prazo · Recurso Ordinário"  sub="Processo 0034127-45.2025 · fim do dia" />
+                </>
+              ) : upcoming.map(u => (
+                <UpcomingRow key={u.id} day={fmtDate(u.dueAt, 'dd')} month={fmtDate(u.dueAt, 'MMM').toUpperCase()} title={u.subject} sub="" />
+              ))}
+            </div>
+          </div>
         </div>
+      </div>
+    </Shell>
+  );
+}
 
-        <nav className="w-full max-w-3xl grid grid-cols-3 md:grid-cols-6 gap-3">
-          {APPS.map((app) => (
-            <a
-              key={app.name}
-              href={app.href}
-              target={app.external ? "_blank" : undefined}
-              rel={app.external ? "noreferrer" : undefined}
-              className="glass rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-gold-300/40 transition group"
-            >
-              <Icon
-                name={app.icon}
-                className="text-gold-300 text-3xl group-hover:scale-110 transition"
-              />
-              <span className="text-xs text-gold-50/80">{app.name}</span>
-            </a>
-          ))}
-        </nav>
-      </section>
-
-      <footer className="text-center py-4 text-[11px] text-gold-50/40">
-        MOTA &amp; Advogados · Intranet v2
-      </footer>
-    </main>
+function BirthdayRow({ initials, name, area, date }: { initials:string; name:string; area:string; date:string }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-dashed border-white/5 py-2">
+      <div className="grid h-8 w-8 place-items-center rounded-full bg-white/5 text-[11px] font-semibold text-gold-300">{initials}</div>
+      <div className="flex-1 leading-tight"><b className="block text-sm">{name}</b><span className="text-[11px] text-ink-500">{area}</span></div>
+      <span className="text-xs font-semibold text-gold-300">{date}</span>
+    </div>
+  );
+}
+function UpcomingRow({ day, month, title, sub }: { day:string; month:string; title:string; sub:string }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-dashed border-white/5 py-2">
+      <div className="grid h-10 w-10 place-items-center rounded-lg bg-white/5 leading-none text-gold-300"><b className="text-sm">{day}</b><span className="text-[9px] tracking-wider">{month}</span></div>
+      <div className="flex-1 leading-tight"><b className="block text-sm">{title}</b><span className="text-[11px] text-ink-500">{sub}</span></div>
+    </div>
   );
 }

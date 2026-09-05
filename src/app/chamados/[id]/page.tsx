@@ -1,174 +1,134 @@
-import { auth } from "@/lib/auth";
-import { redirect, notFound } from "next/navigation";
-import Link from "next/link";
-import { db } from "@/lib/db";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { revalidatePath } from "next/cache";
-import { TicketStatus } from "@prisma/client";
+import { Shell } from '@/components/Shell';
+import { Icon } from '@/components/Icon';
+import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/db';
+import { notFound, redirect } from 'next/navigation';
+import { fmtDateTime, fmtDate } from '@/lib/format';
+import { revalidatePath } from 'next/cache';
+import Link from 'next/link';
 
-const STATUS_OPTIONS = [
-  { value: "ABERTO", label: "Aberto" },
-  { value: "EM_ANDAMENTO", label: "Em andamento" },
-  { value: "AGUARDANDO", label: "Aguardando" },
-  { value: "RESOLVIDO", label: "Resolvido" },
-  { value: "FECHADO", label: "Fechado" },
-];
+const STATUS_STYLE: Record<string, string> = {
+  ABERTO: 'bg-sky-500/15 text-sky-300',
+  EM_ANDAMENTO: 'bg-amber-500/15 text-amber-300',
+  AGUARDANDO_USUARIO: 'bg-violet-500/15 text-violet-300',
+  RESOLVIDO: 'bg-emerald-500/15 text-emerald-300',
+  FECHADO: 'bg-slate-500/15 text-slate-300'
+};
 
-async function addComment(formData: FormData) {
-  "use server";
+async function addComment(ticketId: number, formData: FormData) {
+  'use server';
   const session = await auth();
-  if (!session?.user) redirect("/entrar");
-  const ticketId = String(formData.get("ticketId"));
-  const body = String(formData.get("body") ?? "").trim();
+  const uid = (session?.user as any)?.id;
+  if (!uid) throw new Error('unauth');
+  const body = String(formData.get('body') ?? '').trim();
   if (!body) return;
-
-  await db.ticketComment.create({
-    data: { ticketId, authorId: session.user.id, body },
-  });
+  await prisma.ticketComment.create({ data:{ ticketId, authorId: uid, body } });
   revalidatePath(`/chamados/${ticketId}`);
 }
 
-async function updateStatus(formData: FormData) {
-  "use server";
+async function updateStatus(ticketId: number, formData: FormData) {
+  'use server';
   const session = await auth();
-  if (!session?.user) redirect("/entrar");
-  const role = session.user.role;
-  if (role !== "TI" && role !== "ADMIN") return;
-
-  const ticketId = String(formData.get("ticketId"));
-  const status = String(formData.get("status")) as TicketStatus;
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: { status, closedAt: status === "FECHADO" ? new Date() : null },
-  });
+  const role = (session?.user as any)?.role;
+  if (role !== 'TI' && role !== 'ADMIN') return;
+  const status = String(formData.get('status') ?? '') as any;
+  const closedAt = status === 'FECHADO' || status === 'RESOLVIDO' ? new Date() : null;
+  await prisma.ticket.update({ where:{id:ticketId}, data:{ status, closedAt } });
   revalidatePath(`/chamados/${ticketId}`);
 }
 
-export default async function TicketDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function TicketPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session?.user) redirect("/entrar");
+  if (!session?.user) redirect('/entrar');
   const { id } = await params;
+  const ticketId = Number(id);
+  if (!Number.isFinite(ticketId)) notFound();
 
-  const ticket = await db.ticket.findUnique({
-    where: { id },
-    include: {
-      requester: true,
-      assignee: true,
-      comments: { include: { author: true }, orderBy: { createdAt: "asc" } },
-    },
+  const t = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: { requester:true, assignee:true, comments: { include:{author:true}, orderBy:{createdAt:'asc'} } }
   });
-  if (!ticket) notFound();
-
-  const role = session.user.role;
-  const isTI = role === "TI" || role === "ADMIN";
-  const canView = isTI || ticket.requesterId === session.user.id;
-  if (!canView) redirect("/chamados");
+  if (!t) notFound();
+  const isTi = (session.user as any).role === 'TI' || (session.user as any).role === 'ADMIN';
 
   return (
-    <main className="min-h-screen px-6 py-8 max-w-3xl mx-auto space-y-6">
-      <div>
-        <Link href="/chamados" className="text-xs text-gold-50/50 hover:text-gold-300">
-          ← Chamados
+    <Shell active="ticket">
+      <div className="mx-auto max-w-3xl fade-up">
+        <Link href="/chamados" className="mb-4 inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-100">
+          <Icon name="arrow_back" size={16} /> Voltar aos chamados
         </Link>
-        <h1 className="font-display text-3xl text-gold-50 mt-2">
-          <span className="font-mono text-gold-300">{ticket.protocol}</span>{" "}
-          {ticket.subject}
-        </h1>
-        <div className="text-xs text-gold-50/50 mt-1">
-          Aberto em{" "}
-          {format(ticket.createdAt, "dd/MM/yyyy HH:mm", { locale: ptBR })} ·{" "}
-          {ticket.requester.name ?? ticket.requester.email}
-        </div>
-      </div>
 
-      <div className="glass rounded-2xl p-5 space-y-3">
-        <div className="grid grid-cols-3 gap-3 text-xs">
-          <div>
-            <div className="text-gold-50/50">Categoria</div>
-            <div className="text-gold-50">{ticket.category}</div>
-          </div>
-          <div>
-            <div className="text-gold-50/50">Prioridade</div>
-            <div className="text-gold-50">{ticket.priority}</div>
-          </div>
-          <div>
-            <div className="text-gold-50/50">Status</div>
-            <div className="text-gold-50">{ticket.status}</div>
-          </div>
-        </div>
-        <p className="text-sm text-gold-50/90 whitespace-pre-wrap pt-2 border-t border-gold-300/10">
-          {ticket.description}
-        </p>
-      </div>
-
-      {isTI && (
-        <form
-          action={updateStatus}
-          className="glass rounded-2xl p-4 flex items-center gap-3"
-        >
-          <input type="hidden" name="ticketId" value={ticket.id} />
-          <label className="text-xs text-gold-50/60">Atualizar status</label>
-          <select
-            name="status"
-            defaultValue={ticket.status}
-            className="rounded-lg bg-navy-800/60 border border-gold-300/20 px-3 py-2 text-sm outline-none focus:border-gold-300"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-lg bg-gold-300 text-navy-900 font-semibold px-4 py-2 text-sm hover:bg-gold-100"
-          >
-            Salvar
-          </button>
-        </form>
-      )}
-
-      <section className="space-y-3">
-        <h2 className="font-display text-xl text-gold-50">Comentários</h2>
-        <div className="space-y-3">
-          {ticket.comments.length === 0 && (
-            <p className="text-sm text-gold-50/50">Sem comentários ainda.</p>
-          )}
-          {ticket.comments.map((c) => (
-            <div key={c.id} className="glass rounded-xl p-3">
-              <div className="text-xs text-gold-50/50 mb-1">
-                {c.author.name ?? c.author.email} ·{" "}
-                {format(c.createdAt, "dd/MM/yyyy HH:mm", { locale: ptBR })}
+        <div className="panel p-6 mb-4">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <div className="font-mono text-xs font-semibold text-gold-300">{t.protocol}</div>
+              <h2 className="mt-1 font-display text-2xl font-normal leading-tight">{t.subject}</h2>
+              <div className="mt-2 text-xs text-ink-500">
+                Aberto por <b className="text-ink-300">{t.requester.name ?? t.requester.email}</b> · {fmtDateTime(t.createdAt)}
               </div>
-              <p className="text-sm text-gold-50/90 whitespace-pre-wrap">
-                {c.body}
-              </p>
             </div>
-          ))}
+            <div className="text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">Status</div>
+              <div className={`mt-1 inline-block rounded-pill px-3 py-1 text-xs font-semibold ${STATUS_STYLE[t.status]}`}>
+                {t.status.replaceAll('_',' ')}
+              </div>
+              <div className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-ink-500">Prioridade</div>
+              <div className="mt-1 inline-block rounded-pill bg-gold-300/15 px-3 py-1 text-xs font-semibold text-gold-300">
+                {t.priority}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/5 bg-white/[.02] p-4 text-sm leading-relaxed text-ink-300 whitespace-pre-wrap">
+            {t.description}
+          </div>
+
+          {isTi && (
+            <form action={updateStatus.bind(null, t.id)} className="mt-4 flex items-center gap-2">
+              <select name="status" defaultValue={t.status} className="rounded-lg border border-white/10 bg-white/[.03] px-3 py-1.5 text-sm">
+                {['ABERTO','EM_ANDAMENTO','AGUARDANDO_USUARIO','RESOLVIDO','FECHADO'].map(s => (
+                  <option key={s} value={s}>{s.replaceAll('_',' ')}</option>
+                ))}
+              </select>
+              <button className="rounded-lg bg-gold-gradient px-3 py-1.5 text-sm font-semibold text-navy-900">Atualizar status</button>
+            </form>
+          )}
         </div>
 
-        <form action={addComment} className="glass rounded-2xl p-4 space-y-2">
-          <input type="hidden" name="ticketId" value={ticket.id} />
-          <textarea
-            name="body"
-            required
-            rows={3}
-            placeholder="Escrever um comentário…"
-            className="w-full rounded-lg bg-navy-800/60 border border-gold-300/20 px-3 py-2 text-sm outline-none focus:border-gold-300"
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-gold-300 text-navy-900 font-semibold px-4 py-2 text-sm hover:bg-gold-100"
-          >
-            Comentar
-          </button>
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.2em] text-ink-500">Conversa</div>
+        <div className="space-y-2">
+          {t.comments.length === 0 && <p className="text-sm text-ink-500">Sem mensagens ainda.</p>}
+          {t.comments.map(c => {
+            const isAdmin = c.author.role === 'TI' || c.author.role === 'ADMIN';
+            return (
+              <div key={c.id} className={`rounded-lg border p-4 ${isAdmin ? 'border-gold-300/25 bg-gold-300/[.05]' : 'border-white/5 bg-white/[.02]'}`}>
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${isAdmin ? 'bg-gold-gradient text-navy-900' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                      {(c.author.name ?? '?').split(' ').map(s=>s[0]).slice(0,2).join('')}
+                    </div>
+                    <b className="text-sm">{c.author.name ?? c.author.email}</b>
+                    {isAdmin && <span className="rounded bg-gold-300/15 px-1.5 text-[10px] tracking-wider text-gold-300">TI</span>}
+                  </div>
+                  <span className="text-[11px] text-ink-500">{fmtDate(c.createdAt, "dd/MM 'às' HH:mm")}</span>
+                </div>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{c.body}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <form action={addComment.bind(null, t.id)} className="mt-3 panel p-3">
+          <textarea name="body" rows={3} placeholder="Escreva uma resposta..." className="w-full bg-transparent p-1 outline-none resize-y text-sm" />
+          <div className="flex items-center justify-between border-t border-white/5 pt-2">
+            <div className="flex gap-1 text-ink-500">
+              <Icon name="attach_file" size={20} />
+              <Icon name="alternate_email" size={20} />
+            </div>
+            <button className="rounded-lg bg-gold-gradient px-4 py-1.5 text-sm font-semibold text-navy-900">Enviar</button>
+          </div>
         </form>
-      </section>
-    </main>
+      </div>
+    </Shell>
   );
 }

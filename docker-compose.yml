@@ -1,25 +1,52 @@
 services:
+  db-init:
+    image: node:20-alpine
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        apk add --no-cache git openssl
+        cd /tmp && rm -rf repo
+        git clone --depth=1 https://github.com/carlosslack/mota-intranet-v2.git repo
+        cd repo
+        npm install --no-audit --no-fund prisma@5.22.0 @prisma/client@5.22.0 tsx@4.19.2
+        npx prisma db push --skip-generate --accept-data-loss
+        npx tsx prisma/seed.ts || true
+        echo "==> schema+seed done"
+
   app:
     image: ghcr.io/carlosslack/mota-intranet-v2:latest
+    pull_policy: always
     restart: unless-stopped
-    env_file: .env
     depends_on:
-      db:
-        condition: service_healthy
-    command: sh -c "npx prisma db push --accept-data-loss && node server.js"
-    volumes:
-      - mota-uploads:/app/uploads
-    networks:
-      - web
-      - internal
+      db-init: { condition: service_completed_successfully }
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      AUTH_URL: ${NEXTAUTH_URL}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${AUTH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      AUTH_GOOGLE_ID: ${GOOGLE_CLIENT_ID}
+      AUTH_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_HD: ${GOOGLE_HD}
+      GOOGLE_ADMIN_EMAIL: ${GOOGLE_ADMIN_EMAIL}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL}
     labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=web"
-      - "traefik.http.routers.mota-intranet.rule=Host(`${TRAEFIK_HOST:-intranet.motaadv.net}`)"
-      - "traefik.http.routers.mota-intranet.entrypoints=websecure"
-      - "traefik.http.routers.mota-intranet.tls=true"
-      - "traefik.http.routers.mota-intranet.tls.certresolver=letsencrypt"
-      - "traefik.http.services.mota-intranet.loadbalancer.server.port=3000"
+      - traefik.enable=true
+      - traefik.http.routers.mota-intranet.rule=Host(`${TRAEFIK_HOST}`)
+      - traefik.http.routers.mota-intranet.entrypoints=websecure
+      - traefik.http.routers.mota-intranet.tls.certresolver=letsencrypt
+      - traefik.http.routers.mota-intranet.service=mota-intranet
+      - traefik.http.services.mota-intranet.loadbalancer.server.port=3000
 
   db:
     image: postgres:16-alpine
@@ -31,18 +58,10 @@ services:
     volumes:
       - mota-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - internal
+      test: ["CMD-SHELL","pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   mota-db:
-  mota-uploads:
-
-networks:
-  web:
-    external: true
-  internal:

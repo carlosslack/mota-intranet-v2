@@ -7,18 +7,89 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Auth ───────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  role          Role      @default(USER)
+  emailVerified DateTime?
+  accounts      Account[]
+  sessions      Session[]
+  ticketsOpened   Ticket[]        @relation("Requester")
+  ticketsAssigned Ticket[]        @relation("Assignee")
+  ticketComments  TicketComment[]
+  activities      Activity[]
+  announcements   Announcement[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("users")
+}
 enum Role {
   USER
   TI
   ADMIN
 }
 
+model Account {
+  id String @id @default(cuid())
+  userId String
+  type String
+  provider String
+  providerAccountId String
+  refresh_token String? @db.Text
+  access_token String? @db.Text
+  expires_at Int?
+  token_type String?
+  scope String?
+  id_token String? @db.Text
+  session_state String?
+  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+model Session {
+  id String @id @default(cuid())
+  sessionToken String @unique
+  userId String
+  expires DateTime
+  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+  @@map("sessions")
+}
+model VerificationToken {
+  identifier String
+  token String @unique
+  expires DateTime
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ── Chamados TI ────────────────────────────────────
+model Ticket {
+  id Int @id @default(autoincrement())
+  protocol String @unique
+  subject String
+  description String @db.Text
+  category TicketCategory
+  priority TicketPriority @default(MEDIA)
+  status TicketStatus @default(ABERTO)
+  requesterId String
+  requester User @relation("Requester", fields:[requesterId], references:[id])
+  assigneeId String?
+  assignee User? @relation("Assignee", fields:[assigneeId], references:[id])
+  comments TicketComment[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  closedAt DateTime?
+  @@map("tickets")
+}
 enum TicketCategory {
-  HARDWARE
-  SOFTWARE
   REDE
+  IMPRESSORA
+  SOFTWARE_JURIDICO
   ACESSO
-  IMPRESSAO
+  HARDWARE
   EMAIL
   OUTRO
 }
@@ -27,22 +98,86 @@ enum TicketPriority {
   BAIXA
   MEDIA
   ALTA
-  CRITICA
+  URGENTE
 }
 
 enum TicketStatus {
   ABERTO
   EM_ANDAMENTO
-  AGUARDANDO
+  AGUARDANDO_USUARIO
   RESOLVIDO
   FECHADO
 }
 
+model TicketComment {
+  id Int @id @default(autoincrement())
+  ticketId Int
+  ticket Ticket @relation(fields:[ticketId], references:[id], onDelete: Cascade)
+  authorId String
+  author User @relation(fields:[authorId], references:[id])
+  body String @db.Text
+  createdAt DateTime @default(now())
+  @@map("ticket_comments")
+}
+
+// ── CRM ────────────────────────────────────────────
+model Client {
+  id String @id @default(cuid())
+  type ClientType
+  name String
+  document String?
+  email String?
+  phone String?
+  cases Case[]
+  leads Lead[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("clients")
+}
 enum ClientType {
   PESSOA
   EMPRESA
+  PODER_PUBLICO
 }
 
+model Lead {
+  id String @id @default(cuid())
+  title String
+  clientId String?
+  client Client? @relation(fields:[clientId], references:[id])
+  contactName String?
+  contactEmail String?
+  stage LeadStage @default(NOVO)
+  area LegalArea?
+  valueBrl Decimal? @db.Decimal(12,2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("leads")
+}
+enum LeadStage {
+  NOVO
+  FOLLOW_UP
+  PROPOSTA
+  NEGOCIACAO
+  GANHO
+  PERDIDO
+}
+
+model Case {
+  id String @id @default(cuid())
+  title String
+  cnj String?
+  clientId String
+  client Client @relation(fields:[clientId], references:[id])
+  area LegalArea
+  court String?
+  status CaseStatus @default(ATIVO)
+  valueBrl Decimal? @db.Decimal(12,2)
+  activities Activity[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("cases")
+}
 enum LegalArea {
   CONSULTIVO
   TRABALHISTA
@@ -55,170 +190,52 @@ enum LegalArea {
   RECURSOS
 }
 
-model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  role          Role      @default(USER)
-
-  accounts Account[]
-  sessions Session[]
-
-  ticketsRequested Ticket[]        @relation("TicketRequester")
-  ticketsAssigned  Ticket[]        @relation("TicketAssignee")
-  comments         TicketComment[]
-  activities       Activity[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
-model Ticket {
-  id          String         @id @default(cuid())
-  protocol    String         @unique
-  subject     String
-  description String         @db.Text
-  category    TicketCategory
-  priority    TicketPriority @default(MEDIA)
-  status      TicketStatus   @default(ABERTO)
-
-  requesterId String
-  requester   User   @relation("TicketRequester", fields: [requesterId], references: [id])
-
-  assigneeId String?
-  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
-
-  comments    TicketComment[]
-  attachments TicketAttachment[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  closedAt  DateTime?
-}
-
-model TicketComment {
-  id       String @id @default(cuid())
-  ticketId String
-  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  authorId String
-  author   User   @relation(fields: [authorId], references: [id])
-
-  body      String   @db.Text
-  createdAt DateTime @default(now())
-}
-
-model TicketAttachment {
-  id       String @id @default(cuid())
-  ticketId String
-  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  name     String
-  url      String
-  size     Int
-  mimeType String
-
-  createdAt DateTime @default(now())
-}
-
-model Client {
-  id          String     @id @default(cuid())
-  type        ClientType
-  name        String
-  document    String?    @unique
-  email       String?
-  phone       String?
-  address     String?
-
-  cases Case[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Case {
-  id       String    @id @default(cuid())
-  number   String    @unique
-  title    String
-  area     LegalArea
-  summary  String?   @db.Text
-
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id])
-
-  activities Activity[]
-
-  openedAt DateTime  @default(now())
-  closedAt DateTime?
+enum CaseStatus {
+  ATIVO
+  ARQUIVADO
+  ENCERRADO
 }
 
 model Activity {
-  id     String  @id @default(cuid())
-  caseId String
-  case   Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  description String   @db.Text
-  minutes     Int      @default(0)
-  performedAt DateTime @default(now())
+  id String @id @default(cuid())
+  caseId String?
+  case Case? @relation(fields:[caseId], references:[id])
+  type ActivityType
+  subject String
+  dueAt DateTime?
+  doneAt DateTime?
+  ownerId String
+  owner User @relation(fields:[ownerId], references:[id])
+  createdAt DateTime @default(now())
+  @@map("activities")
+}
+enum ActivityType {
+  CALL
+  MEETING
+  TASK
+  DEADLINE
+  AUDIENCIA
+  PRAZO
 }
 
 model Service {
-  id          String  @id @default(cuid())
-  sku         String  @unique
-  name        String
-  description String? @db.Text
-  price       Decimal @default(0)
-
+  id String @id @default(cuid())
+  sku String @unique
+  area LegalArea
+  title String
+  description String @db.Text
+  priceBrl Decimal @db.Decimal(12,2)
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@map("services")
 }
 
 model Announcement {
-  id      String   @id @default(cuid())
-  title   String
-  body    String   @db.Text
-  pinned  Boolean  @default(false)
-
+  id String @id @default(cuid())
+  title String
+  body String @db.Text
+  tag String?
+  authorId String
+  author User @relation(fields:[authorId], references:[id])
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@map("announcements")
 }

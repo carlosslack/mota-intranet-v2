@@ -1,120 +1,104 @@
-import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
-import Link from "next/link";
-import { db } from "@/lib/db";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { Icon } from "@/components/Icon";
+import { Shell } from '@/components/Shell';
+import { Icon } from '@/components/Icon';
+import Link from 'next/link';
+import { prisma } from '@/lib/db';
+import { auth } from '@/lib/auth';
+import { fmtDateTime } from '@/lib/format';
 
-const STATUS_STYLES: Record<string, string> = {
-  ABERTO: "bg-blue-500/20 text-blue-200 border-blue-400/30",
-  EM_ANDAMENTO: "bg-yellow-500/20 text-yellow-200 border-yellow-400/30",
-  AGUARDANDO: "bg-orange-500/20 text-orange-200 border-orange-400/30",
-  RESOLVIDO: "bg-emerald-500/20 text-emerald-200 border-emerald-400/30",
-  FECHADO: "bg-slate-500/20 text-slate-200 border-slate-400/30",
+const STATUS_STYLE: Record<string, string> = {
+  ABERTO: 'bg-sky-500/15 text-sky-300 border-sky-400/30',
+  EM_ANDAMENTO: 'bg-amber-500/15 text-amber-300 border-amber-400/30',
+  AGUARDANDO_USUARIO: 'bg-violet-500/15 text-violet-300 border-violet-400/30',
+  RESOLVIDO: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30',
+  FECHADO: 'bg-slate-500/15 text-slate-300 border-slate-400/30'
 };
-
 const STATUS_LABEL: Record<string, string> = {
-  ABERTO: "Aberto",
-  EM_ANDAMENTO: "Em andamento",
-  AGUARDANDO: "Aguardando",
-  RESOLVIDO: "Resolvido",
-  FECHADO: "Fechado",
+  ABERTO: 'Aberto', EM_ANDAMENTO: 'Em andamento',
+  AGUARDANDO_USUARIO: 'Aguardando usuário', RESOLVIDO: 'Resolvido', FECHADO: 'Fechado'
+};
+const CAT_LABEL: Record<string, string> = {
+  REDE: 'Rede', IMPRESSORA: 'Impressora', SOFTWARE_JURIDICO: 'Software jurídico',
+  ACESSO: 'Acesso', HARDWARE: 'Hardware', EMAIL: 'E-mail', OUTRO: 'Outro'
 };
 
 export default async function ChamadosPage() {
   const session = await auth();
-  if (!session?.user) redirect("/entrar");
+  const isTi = (session?.user as any)?.role === 'TI' || (session?.user as any)?.role === 'ADMIN';
+  const myId = (session?.user as any)?.id;
 
-  const role = session.user.role;
-  const isTI = role === "TI" || role === "ADMIN";
+  const where = isTi ? {} : { requesterId: myId };
+  const [tickets, aberto, andamento, aguard, resolv] = await Promise.all([
+    prisma.ticket.findMany({ where, orderBy:{createdAt:'desc'}, take:50, include:{requester:true} }),
+    prisma.ticket.count({ where: { ...where, status: 'ABERTO' } }),
+    prisma.ticket.count({ where: { ...where, status: 'EM_ANDAMENTO' } }),
+    prisma.ticket.count({ where: { ...where, status: 'AGUARDANDO_USUARIO' } }),
+    prisma.ticket.count({ where: { ...where, status: 'RESOLVIDO' } })
+  ]);
 
-  const tickets = await db.ticket.findMany({
-    where: isTI ? undefined : { requesterId: session.user.id },
-    include: { requester: true },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
+  const stats = [
+    { label:'Abertos',              value: aberto,    sub:'aguardando triagem',       icon:'inbox',              color:'text-sky-400' },
+    { label:'Em andamento',         value: andamento, sub:'sob responsabilidade TI',  icon:'progress_activity',  color:'text-amber-400' },
+    { label:'Aguardando usuário',   value: aguard,    sub:'resposta pendente',        icon:'schedule',           color:'text-violet-400' },
+    { label:'Resolvidos (todos)',   value: resolv,    sub:'nos últimos períodos',     icon:'task_alt',           color:'text-emerald-400' }
+  ];
 
   return (
-    <main className="min-h-screen px-6 py-8 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <Link href="/" className="text-xs text-gold-50/50 hover:text-gold-300">
-            ← Início
-          </Link>
-          <h1 className="font-display text-3xl text-gold-50 mt-2">Chamados</h1>
-          <p className="text-sm text-gold-50/60">
-            {isTI ? "Todos os chamados abertos na intranet" : "Meus chamados"}
-          </p>
+    <Shell active="tickets">
+      <div className="fade-up">
+        <div className="mb-5 grid grid-cols-4 gap-4">
+          {stats.map(s => (
+            <div key={s.label} className="panel p-4">
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+                <Icon name={s.icon} size={16} className={s.color} />{s.label}
+              </div>
+              <div className="font-display text-3xl font-normal leading-none">{s.value}</div>
+              <div className="mt-1 text-[11px] text-ink-500">{s.sub}</div>
+            </div>
+          ))}
         </div>
-        <Link
-          href="/chamados/novo"
-          className="flex items-center gap-2 rounded-xl bg-gold-300 text-navy-900 font-semibold px-4 py-2 hover:bg-gold-100 transition"
-        >
-          <Icon name="add" /> Novo chamado
-        </Link>
-      </div>
 
-      <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="text-left text-gold-50/60 text-xs uppercase tracking-wider">
-            <tr>
-              <th className="px-4 py-3">Protocolo</th>
-              <th className="px-4 py-3">Assunto</th>
-              <th className="px-4 py-3">Categoria</th>
-              <th className="px-4 py-3">Solicitante</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Aberto em</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-8 text-center text-gold-50/50"
-                >
-                  Nenhum chamado por enquanto.
-                </td>
-              </tr>
-            ) : (
-              tickets.map((t) => (
-                <tr
-                  key={t.id}
-                  className="border-t border-gold-300/10 hover:bg-navy-800/40"
-                >
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/chamados/${t.id}`}
-                      className="font-mono text-gold-300 hover:underline"
-                    >
-                      {t.protocol}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-gold-50">{t.subject}</td>
-                  <td className="px-4 py-3 text-gold-50/70">{t.category}</td>
-                  <td className="px-4 py-3 text-gold-50/70">
-                    {t.requester.name ?? t.requester.email}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                        STATUS_STYLES[t.status] ?? ""
-                      }`}
-                    >
-                      {STATUS_LABEL[t.status] ?? t.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gold-50/60 text-xs">
-                    {format(t.createdAt, "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <Chip active>Todos ({tickets.length})</Chip>
+          {isTi && <Chip>Meus atribuídos</Chip>}
+          <Chip>Rede &amp; Internet</Chip>
+          <Chip>Software jurídico</Chip>
+          <Chip>Acesso / Senha</Chip>
+        </div>
+
+        <div className="panel overflow-hidden">
+          <div className="grid grid-cols-[110px_1fr_130px_170px_140px_130px] gap-4 border-b border-white/5 bg-white/[.02] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.16em] text-ink-500">
+            <div>Protocolo</div><div>Assunto</div><div>Categoria</div><div>Solicitante</div><div>Status</div><div>Aberto em</div>
+          </div>
+          {tickets.length === 0 && (
+            <div className="p-12 text-center text-sm text-ink-500">Nenhum chamado encontrado. <Link href="/chamados/novo" className="text-gold-300">Abrir o primeiro →</Link></div>
+          )}
+          {tickets.map(t => (
+            <Link key={t.id} href={`/chamados/${t.id}`}
+              className="grid grid-cols-[110px_1fr_130px_170px_140px_130px] items-center gap-4 border-b border-white/5 px-5 py-3 text-sm hover:bg-white/[.02]">
+              <span className="font-mono text-xs font-semibold text-gold-300">{t.protocol}</span>
+              <div>
+                <b className="block leading-tight">{t.subject}</b>
+                {(t.priority === 'URGENTE' || t.priority === 'ALTA') && (
+                  <span className="text-[10px] uppercase tracking-wider text-rose-300">● {t.priority === 'URGENTE' ? 'Urgente' : 'Alta'}</span>
+                )}
+              </div>
+              <span className="text-ink-300 text-xs">{CAT_LABEL[t.category] ?? t.category}</span>
+              <span className="text-ink-300 text-xs">{t.requester.name ?? t.requester.email}</span>
+              <span className={`inline-flex w-fit items-center gap-1.5 rounded-pill border px-2.5 py-0.5 text-[11px] ${STATUS_STYLE[t.status] ?? ''}`}>
+                {STATUS_LABEL[t.status] ?? t.status}
+              </span>
+              <span className="text-[11px] text-ink-500">{fmtDateTime(t.createdAt)}</span>
+            </Link>
+          ))}
+        </div>
       </div>
-    </main>
+    </Shell>
   );
+}
+
+function Chip({ children, active }: { children: React.ReactNode; active?: boolean }) {
+  const cls = active
+    ? 'bg-gold-300/15 text-gold-300 border-gold-300/35'
+    : 'bg-transparent text-ink-300 border-white/10';
+  return <span className={`rounded-pill border px-3 py-1 text-xs cursor-pointer ${cls}`}>{children}</span>;
 }
