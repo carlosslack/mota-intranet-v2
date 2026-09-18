@@ -22,6 +22,7 @@ model User {
   ticketComments  TicketComment[]
   activities      Activity[]
   announcements   Announcement[]
+  financeBases    FinanceBase[]   @relation("FinanceOwner")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@map("users")
@@ -238,4 +239,58 @@ model Announcement {
   author User @relation(fields:[authorId], references:[id])
   createdAt DateTime @default(now())
   @@map("announcements")
+}
+
+// ── Financeiro IA / DataDocs ───────────────────────
+model FinanceBase {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  owner       User           @relation("FinanceOwner", fields: [ownerId], references: [id])
+  files       FinanceFile[]
+  queries     FinanceQuery[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  @@map("finance_bases")
+}
+
+model FinanceFile {
+  id        String            @id @default(cuid())
+  baseId    String
+  base      FinanceBase       @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  filename  String
+  mimeType  String
+  size      Int
+  kind      FinanceFileKind   @default(TEXTO)
+  status    FinanceFileStatus @default(NA_FILA)
+  content   String?           @db.Text
+  embedding Json?
+  error     String?
+  createdAt DateTime          @default(now())
+  @@map("finance_files")
+}
+
+enum FinanceFileKind {
+  TEXTO
+  TABULAR
+}
+
+enum FinanceFileStatus {
+  NA_FILA
+  PROCESSANDO
+  PRONTO
+  ERRO
+}
+
+model FinanceQuery {
+  id        String      @id @default(cuid())
+  baseId    String
+  base      FinanceBase @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  prompt    String      @db.Text
+  columns   Json?
+  rows      Json?
+  answer    String?     @db.Text
+  createdAt DateTime    @default(now())
+  @@map("finance_queries")
 }
